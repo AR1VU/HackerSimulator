@@ -7,6 +7,8 @@ export interface Command {
 export interface TerminalState {
   currentInput: string;
   commandHistory: Command[];
+  commandHistoryIndex: number;
+  inputHistory: string[];
   isLoggedIn: boolean;
   username: string;
 }
