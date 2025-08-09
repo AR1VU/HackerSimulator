@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Command } from '../types/terminal';
-import { processCommand, getCurrentTime, getCommandSuggestions } from '../utils/commands';
+import { processCommand, getCurrentTime, getCommandSuggestions, getCurrentConnection, getNetworkNodes } from '../utils/commands';
 import { TerminalOutput } from './TerminalOutput';
+import { NetworkMap, NetworkNode } from './NetworkMap';
 import { useSound } from '../hooks/useSound';
 
 interface TerminalProps {
@@ -19,6 +20,8 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
   const [showCursor, setShowCursor] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [networkNodes, setNetworkNodes] = useState<NetworkNode[]>([]);
+  const [connectedNode, setConnectedNode] = useState<string | undefined>();
   const inputRef = useRef<HTMLInputElement>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const { playEnter, playTyping } = useSound();
@@ -30,7 +33,7 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
         '',
         '╔══════════════════════════════════════════════════════════════╗',
         '║                                                              ║',
-        '║               HACKER TYCOON v1.0                             ║',
+        '║            THE UNDERGROUND NETWORK v1.0                      ║',
         '║           Welcome to the Underground Terminal                ║',
         '║                                                              ║',
         '╚══════════════════════════════════════════════════════════════╝',
@@ -38,7 +41,7 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
         'System initialized successfully.',
         "Type 'help' to see available commands.",
         '',
-        '💡 New: Use "skills" command to view your skill tree!',
+        '💡 Tip: Use "hint" for helpful tips and guidance!',
         ''
       ];
 
@@ -208,8 +211,27 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
     try {
       const output = await processCommand(command, username);
       
+      let finalOutput: string[];
+      let shouldUpdateNetwork = false;
+      
+      // Handle different response types
+      if (Array.isArray(output)) {
+        finalOutput = output;
+      } else if (typeof output === 'object' && 'output' in output) {
+        finalOutput = output.output;
+        if (output.networkNodes) {
+          setNetworkNodes(output.networkNodes);
+          shouldUpdateNetwork = true;
+        }
+        if (output.connectedNode !== undefined) {
+          setConnectedNode(output.connectedNode);
+        }
+      } else {
+        finalOutput = [String(output)];
+      }
+      
       // Handle special commands
-      if (output[0] === 'CLEAR_TERMINAL') {
+      if (finalOutput[0] === 'CLEAR_TERMINAL') {
         setCommandHistory([]);
         setIsProcessing(false);
         return;
@@ -220,12 +242,18 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
         return;
       }
       
+      // Update connection state for any command
+      const currentConn = getCurrentConnection();
+      if (currentConn !== connectedNode) {
+        setConnectedNode(currentConn || undefined);
+      }
+      
       // Update the command with real output
       setCommandHistory(prev => {
         const newHistory = [...prev];
         newHistory[newHistory.length - 1] = {
           input: command,
-          output,
+          output: finalOutput,
           timestamp
         };
         return newHistory;
@@ -293,7 +321,12 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
         
         {/* Terminal Content */}
         <div ref={terminalRef} className="flex-1 flex flex-col overflow-hidden">
-          <TerminalOutput commandHistory={commandHistory} username={username} />
+          <TerminalOutput 
+            commandHistory={commandHistory} 
+            username={username}
+            networkNodes={networkNodes}
+            connectedNode={connectedNode}
+          />
           
           {/* Command Suggestions */}
           {showSuggestions && suggestions.length > 0 && (
@@ -313,11 +346,22 @@ export const Terminal: React.FC<TerminalProps> = ({ username, onExit }) => {
             </div>
           )}
           
+          {/* Hint Bar */}
+          {!isProcessing && (
+            <div className="px-4 pb-2">
+              <div className="text-green-600 text-xs opacity-60">
+                💡 Need help? Type "hint" for guidance | Quick start: "scan" → "connect &lt;ip&gt;" → "ls" → "cd &lt;dir&gt;"
+              </div>
+            </div>
+          )}
+          
           {/* Input Line */}
           <div className="p-4 pt-0 flex-shrink-0">
             <form onSubmit={handleSubmit} className="flex items-center">
               <span className="text-green-600">[{getCurrentTime()}]</span>
-              <span className="text-green-300 ml-2">{username}@matrix</span>
+              <span className="text-green-300 ml-2">
+                {connectedNode ? `root@${connectedNode}` : `${username}@matrix`}
+              </span>
               <span className="text-green-400">:</span>
               <span className="text-green-300">~</span>
               <span className="text-green-400 mr-1">$</span>

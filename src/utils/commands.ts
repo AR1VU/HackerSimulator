@@ -1,4 +1,7 @@
 import { Command } from '../types/terminal';
+import { NetworkNode } from '../components/NetworkMap';
+import { generateNetworkNodes, getNodeFiles } from './networkGenerator';
+import { generateFileSystem, FileSystemNavigator } from './filesystem';
 
 interface CommandDefinition {
   description: string;
@@ -8,13 +11,9 @@ interface CommandDefinition {
 
 // Simulated network state
 let currentConnection: string | null = null;
-const networkNodes = [
-  '192.168.1.1',
-  '192.168.1.100',
-  '10.0.0.1',
-  '172.16.0.50',
-  '203.0.113.42'
-];
+let networkNodes: NetworkNode[] = [];
+let lastScanTime: number = 0;
+let fileSystemNavigators: Map<string, FileSystemNavigator> = new Map();
 
 // Fake file system
 const fileSystem: Record<string, string> = {
@@ -34,13 +33,16 @@ const commands: Record<string, CommandDefinition> = {
       '  help                    - Show this help message',
       '  clear                   - Clear the terminal',
       '  scan                    - Scan network for active nodes',
+      '  scan-detailed           - Detailed network scan with ports',
       '  connect <ip>            - Connect to a network node',
       '  disconnect              - Disconnect from current node',
-      '  download <file>         - Download a file from current node',
-      '  upload <file>           - Upload a file to current node',
-      '  cat <file>              - Display file contents',
+      '  cd <directory>          - Change directory (when connected)',
       '  ls                      - List directory contents',
       '  pwd                     - Print working directory',
+      '  cat <file>              - Display file contents',
+      '  download <file>         - Download a file from current node',
+      '  downloads               - Show downloaded files',
+      '  upload <file>           - Upload a file to current node',
       '  whoami                  - Display current user',
       '  ps                      - Show running processes',
       '  netstat                 - Show network connections',
@@ -56,6 +58,7 @@ const commands: Record<string, CommandDefinition> = {
       '  uname                   - System information',
       '  matrix                  - Enter the Matrix',
       '  skills                  - View your skill tree',
+      '  hint                    - Get helpful tips and guidance',
       '  exit                    - Logout from system'
     ]
   },
@@ -67,24 +70,71 @@ const commands: Record<string, CommandDefinition> = {
 
   scan: {
     description: 'Scan network for active nodes',
-    execute: async () => {
+    execute: async (args, username) => {
+      // Generate or refresh network nodes
+      const now = Date.now();
+      if (networkNodes.length === 0 || now - lastScanTime > 300000) { // Refresh every 5 minutes
+        networkNodes = generateNetworkNodes();
+        lastScanTime = now;
+      }
+      
       const results = [
         'Initiating network scan...',
-        'Scanning subnet 192.168.1.0/24...',
+        'Scanning subnet 192.168.0.0/24...',
+        'Probing 25 hosts...',
         ''
       ];
       
       // Simulate scanning delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      results.push('Active nodes discovered:');
-      networkNodes.forEach((ip, index) => {
-        const status = Math.random() > 0.3 ? 'ONLINE' : 'FILTERED';
-        const ports = status === 'ONLINE' ? '[22,80,443]' : '[BLOCKED]';
-        results.push(`  ${ip.padEnd(15)} ${status.padEnd(10)} ${ports}`);
+      // Add network map
+      results.push('NETWORK_MAP_START');
+      results.push('NETWORK_MAP_END');
+      results.push('');
+      
+      // Add summary
+      const statusCounts = networkNodes.reduce((acc, node) => {
+        acc[node.status] = (acc[node.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      results.push('Scan Summary:');
+      results.push(`  Vulnerable: ${statusCounts.vulnerable || 0}`);
+      results.push(`  Encrypted:  ${statusCounts.encrypted || 0}`);
+      results.push(`  Honeypots:  ${statusCounts.honeypot || 0}`);
+      results.push(`  Firewalled: ${statusCounts.firewall || 0}`);
+      results.push(`  Offline:    ${statusCounts.offline || 0}`);
+      results.push('');
+      results.push('Use "connect <ip>" to access a node.');
+      results.push('Example: connect 192.168.0.5');
+      
+      return results;
+    }
+  },
+
+  'scan-detailed': {
+    description: 'Detailed network scan with port information',
+    execute: async () => {
+      if (networkNodes.length === 0) {
+        return ['No network data available. Run "scan" first.'];
+      }
+      
+      const results = [
+        'Detailed Network Scan Results:',
+        '================================',
+        ''
+      ];
+      
+      networkNodes.forEach(node => {
+        if (node.status !== 'offline') {
+          results.push(`${node.ip.padEnd(15)} [${node.status.toUpperCase()}]`);
+          results.push(`  Ports: ${node.ports.join(', ')}`);
+          results.push(`  Services: ${node.services.join(', ')}`);
+          results.push('');
+        }
       });
       
-      results.push('', `Scan complete. ${networkNodes.length} nodes found.`);
       return results;
     }
   },
@@ -99,21 +149,60 @@ const commands: Record<string, CommandDefinition> = {
       
       const targetIp = args[0];
       
-      if (!networkNodes.includes(targetIp)) {
+      const targetNode = networkNodes.find(node => node.ip === targetIp);
+      
+      if (!targetNode) {
         return [`Error: Host ${targetIp} not found or unreachable`];
+      }
+      
+      if (targetNode.status === 'offline') {
+        return [`Error: Host ${targetIp} is offline`];
       }
       
       const results = [
         `Connecting to ${targetIp}...`,
-        'Establishing secure tunnel...',
-        'Bypassing firewall...',
-        'Authenticating...'
+        'Establishing connection...'
       ];
       
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Different connection behavior based on node type
+      if (targetNode.status === 'firewall') {
+        results.push('Firewall detected...');
+        results.push('Attempting to bypass...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        if (Math.random() < 0.3) {
+          results.push('✗ Connection blocked by firewall');
+          return results;
+        } else {
+          results.push('✓ Firewall bypassed');
+        }
+      } else if (targetNode.status === 'honeypot') {
+        results.push('Authenticating...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        results.push('⚠️  WARNING: Honeypot detected!');
+        results.push('⚠️  Your connection may be monitored');
+      } else if (targetNode.status === 'encrypted') {
+        results.push('Encrypted connection required...');
+        results.push('Attempting handshake...');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        results.push('✓ Secure tunnel established');
+      } else {
+        results.push('Authenticating...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
       
       currentConnection = targetIp;
-      results.push(`✓ Connected to ${targetIp}`, `You are now connected to node ${targetIp}`);
+      
+      // Initialize file system navigator for this node
+      if (!fileSystemNavigators.has(targetIp)) {
+        const fileSystem = generateFileSystem(targetNode);
+        fileSystemNavigators.set(targetIp, new FileSystemNavigator(fileSystem));
+      }
+      
+      results.push(`✓ Connected to ${targetIp}`);
+      results.push(`Node type: ${targetNode.status.toUpperCase()}`);
+      results.push('File system initialized');
+      results.push('Use "ls" to list files, "cd <dir>" to navigate, "cat <file>" to read files');
       
       return results;
     }
@@ -148,24 +237,24 @@ const commands: Record<string, CommandDefinition> = {
         return ['Error: Not connected to any node. Use "connect <ip>" first.'];
       }
       
-      const filename = args[0];
-      const results = [
-        `Downloading ${filename} from ${currentConnection}...`,
-        'Establishing data channel...'
-      ];
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      if (Math.random() > 0.2) {
-        results.push(
-          `Transfer complete: ${filename} (${Math.floor(Math.random() * 1000 + 100)} KB)`,
-          `File saved to /downloads/${filename}`
-        );
-      } else {
-        results.push('Error: File not found or access denied');
+      const navigator = fileSystemNavigators.get(currentConnection);
+      if (!navigator) {
+        return ['Error: Connection lost'];
       }
       
-      return results;
+      const filename = args[0];
+      
+      const result = navigator.downloadFile(filename, currentConnection);
+      
+      if (result.success) {
+        return [
+          `Downloading ${filename} from ${currentConnection}...`,
+          'Establishing data channel...',
+          result.message || 'Download completed'
+        ];
+      } else {
+        return [result.message || 'Download failed'];
+      }
     }
   },
 
@@ -212,27 +301,93 @@ const commands: Record<string, CommandDefinition> = {
       
       const filename = args[0];
       
-      if (fileSystem[filename]) {
-        return ['', fileSystem[filename], ''];
-      } else {
+      if (!currentConnection) {
+        // Check local files first
+        if (fileSystem[filename]) {
+          return ['', fileSystem[filename], ''];
+        }
         return [`cat: ${filename}: No such file or directory`];
       }
+      
+      // Use file system navigator for connected nodes
+      const navigator = fileSystemNavigators.get(currentConnection);
+      if (navigator) {
+        const result = navigator.readFile(filename);
+        if (result.success) {
+          return ['', result.message || '', ''];
+        } else {
+          return [result.message || `cat: ${filename}: No such file or directory`];
+        }
+      }
+      
+      return [`cat: ${filename}: No such file or directory`];
     }
   },
 
   ls: {
     description: 'List directory contents',
     execute: () => {
-      const files = Object.keys(fileSystem);
-      const results = ['total ' + files.length];
+      if (!currentConnection) {
+        // Show local files
+        const files = Object.keys(fileSystem);
+        const results = ['Local directory contents:', 'total ' + files.length];
+        
+        files.forEach(file => {
+          const size = Math.floor(Math.random() * 10000 + 1000);
+          const date = 'Jan 15 12:' + String(Math.floor(Math.random() * 60)).padStart(2, '0');
+          results.push(`-rw-r--r-- 1 root root ${size.toString().padStart(8)} ${date} ${file}`);
+        });
+        
+        return results;
+      }
       
-      files.forEach(file => {
-        const size = Math.floor(Math.random() * 10000 + 1000);
-        const date = 'Jan 15 12:' + String(Math.floor(Math.random() * 60)).padStart(2, '0');
-        results.push(`-rw-r--r-- 1 root root ${size.toString().padStart(8)} ${date} ${file}`);
-      });
+      // Use file system navigator for connected nodes
+      const navigator = fileSystemNavigators.get(currentConnection);
+      if (navigator) {
+        return navigator.listDirectory();
+      }
       
-      return results;
+      return ['Error: Connection lost'];
+    }
+  },
+
+  cd: {
+    description: 'Change directory',
+    usage: 'cd <directory>',
+    execute: (args) => {
+      if (!currentConnection) {
+        return ['cd: command only available when connected to a remote node'];
+      }
+      
+      const navigator = fileSystemNavigators.get(currentConnection);
+      if (!navigator) {
+        return ['Error: Connection lost'];
+      }
+      
+      const path = args.length > 0 ? args[0] : '/';
+      const result = navigator.changeDirectory(path);
+      
+      if (result.success) {
+        return [`Changed directory to: ${navigator.getCurrentPath()}`];
+      } else {
+        return [result.message || 'cd: failed to change directory'];
+      }
+    }
+  },
+
+  pwd: {
+    description: 'Print working directory',
+    execute: () => {
+      if (!currentConnection) {
+        return ['/home/hacker'];
+      }
+      
+      const navigator = fileSystemNavigators.get(currentConnection);
+      if (navigator) {
+        return [navigator.getCurrentPath()];
+      }
+      
+      return ['/'];
     }
   },
 
@@ -362,15 +517,11 @@ const commands: Record<string, CommandDefinition> = {
     }
   },
 
-  // Keep existing commands
-  pwd: {
-    description: 'Print working directory',
-    execute: () => [currentConnection ? `/remote/${currentConnection}` : '/home/hacker']
-  },
-
   whoami: {
     description: 'Display current user',
-    execute: (args, username) => [`${username}@matrix`]
+    execute: (args, username) => [
+      currentConnection ? `root@${currentConnection}` : `${username}@matrix`
+    ]
   },
 
   date: {
@@ -449,6 +600,77 @@ const commands: Record<string, CommandDefinition> = {
     ]
   },
 
+  hint: {
+    description: 'Get helpful tips and guidance',
+    execute: () => {
+      const hints = [
+        '🔍 NETWORK EXPLORATION TIPS:',
+        '  • Start with "scan" to discover network nodes',
+        '  • Look for vulnerable (V) nodes - they\'re easier to access',
+        '  • Use "connect <ip>" to access a specific node',
+        '  • Try "ls" and "cat <file>" once connected to explore files',
+        '',
+        '⚡ QUICK START GUIDE:',
+        '  1. Type "scan" to see the network map',
+        '  2. Find a red "V" node (vulnerable)',
+        '  3. Type "connect 192.168.0.X" (replace X with node number)',
+        '  4. Use "ls" to see available files',
+        '  5. Use "cat <filename>" to read interesting files',
+        '',
+        '🛡️ NODE TYPES EXPLAINED:',
+        '  • V (Red) = Vulnerable - Easy to access, may contain valuable data',
+        '  • E (Blue) = Encrypted - Secure but may have useful files',
+        '  • H (Purple) = Honeypot - Fake system, will detect intrusion',
+        '  • F (Gray) = Firewall - Protected, harder to access',
+        '  • X (Dark) = Offline - Cannot connect',
+        '',
+        '🎯 USEFUL COMMANDS:',
+        '  • "nmap <ip>" - Scan ports on a specific target',
+      ]
+      '  • "cd <directory>" - Navigate to a directory',
+      '  • "pwd" - Show current directory path',
+        '  • "exploit <ip>" - Attempt to compromise a system',
+        '  • "download <file>" - Download files from connected node',
+        '  • "disconnect" - Return to base terminal',
+        '',
+        '💡 Pro tip: Each node type has different files and security levels!'
+      '💡 Pro tip: Each node has a full file system to explore!',
+      '💡 Navigate with cd, explore with ls, read with cat, download with download!'
+      
+      return hints;
+    }
+  },
+
+  downloads: {
+    description: 'Show downloaded files',
+    execute: () => {
+      const allDownloads: { filename: string; content: string; source: string; timestamp: string }[] = [];
+      
+      // Collect downloads from all navigators
+      fileSystemNavigators.forEach((navigator) => {
+        allDownloads.push(...navigator.getDownloadedFiles());
+      });
+      
+      if (allDownloads.length === 0) {
+        return ['No files downloaded yet.', 'Use "download <filename>" while connected to a node to download files.'];
+      }
+      
+      const results = ['Downloaded Files:', '================', ''];
+      
+      allDownloads.forEach((file, index) => {
+        const date = new Date(file.timestamp).toLocaleString();
+        results.push(`${index + 1}. ${file.filename}`);
+        results.push(`   Source: ${file.source}`);
+        results.push(`   Downloaded: ${date}`);
+        results.push(`   Size: ${file.content.length} bytes`);
+        results.push('');
+      });
+      
+      results.push(`Total: ${allDownloads.length} files downloaded`);
+      return results;
+    }
+  },
+
   ping: {
     description: 'Ping a host',
     usage: 'ping <host>',
@@ -509,7 +731,7 @@ const commands: Record<string, CommandDefinition> = {
   }
 };
 
-export const processCommand = async (input: string, username: string): Promise<string[]> => {
+export const processCommand = async (input: string, username: string): Promise<string[] | { output: string[], networkNodes?: NetworkNode[], connectedNode?: string }> => {
   const trimmedInput = input.trim();
   if (!trimmedInput) return [];
   
@@ -525,7 +747,17 @@ export const processCommand = async (input: string, username: string): Promise<s
   
   try {
     const result = await command.execute(args, username);
-    return result;
+    
+    // Check if this is a scan command that should return network data
+    if (commandName === 'scan' && Array.isArray(result)) {
+      return {
+        output: result,
+        networkNodes: networkNodes,
+        connectedNode: currentConnection || undefined
+      };
+    }
+    
+    return Array.isArray(result) ? result : [result];
   } catch (error) {
     return [`Error executing command: ${commandName}`, 'Please try again.'];
   }
@@ -549,4 +781,12 @@ export const getAllCommands = (): string[] => {
 export const getCurrentTime = (): string => {
   const now = new Date();
   return now.toTimeString().split(' ')[0];
+};
+
+export const getCurrentConnection = (): string | null => {
+  return currentConnection;
+};
+
+export const getNetworkNodes = (): NetworkNode[] => {
+  return networkNodes;
 };
