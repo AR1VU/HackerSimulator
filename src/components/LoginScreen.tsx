@@ -145,6 +145,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             </div>
           </div>
           
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <div className="mb-2">Username:</div>
@@ -162,7 +163,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </div>
               <div className="h-px bg-green-400 mt-1"></div>
             </div>
-            
+
             <div>
               <div className="mb-2">Password:</div>
               <div className="flex items-center">
@@ -178,7 +179,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </div>
               <div className="h-px bg-green-400 mt-1"></div>
             </div>
-            
+
             <div className="pt-4">
               <button
                 type="submit"
@@ -186,6 +187,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               >
                 [ AUTHENTICATE ]
               </button>
+            </div>
+            {/* Tooltip for user */}
+            <div className="mt-4 text-xs text-green-300 text-center opacity-80">
+              Tip: You can enter any username and password to login.
             </div>
           </form>
           
